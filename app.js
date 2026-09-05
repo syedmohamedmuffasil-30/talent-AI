@@ -403,27 +403,93 @@ function closeModal() {
    EVALUATION LOGIC (Simulated AI)
 ══════════════════════════════════════ */
 async function runEvaluation() {
-  const stages = [
-    { label: 'Analysing resume…', pct: 15 },
-    { label: 'Matching skills to job description…', pct: 35 },
-    { label: 'Scoring interview answers…', pct: 55 },
-    { label: 'Calculating approval rating…', pct: 75 },
-    { label: 'Generating shortlist recommendation…', pct: 90 },
-    { label: 'Finalising report…', pct: 100 },
-  ];
   const stagesEl = document.getElementById('loading-stages');
   const barEl    = document.getElementById('loading-bar');
 
-  for (const s of stages) {
-    stagesEl.textContent = s.label;
-    barEl.style.width = `${s.pct}%`;
-    await sleep(600 + Math.random() * 400);
+  stagesEl.textContent = 'Connecting to AI backend…';
+  barEl.style.width = '20%';
+  await sleep(400);
+
+  // Build FormData for the Webhook
+  const formData = new FormData();
+  formData.append('jobTitle', val('jobTitle'));
+  formData.append('jobDescription', val('jobDescription'));
+  formData.append('candidateName', val('candidateName'));
+  formData.append('candidateEmail', val('candidateEmail'));
+  formData.append('candidateId', val('candidateId'));
+  formData.append('maxQuestions', val('maxQuestions'));
+  formData.append('minRank', val('minRankNum'));
+  formData.append('minApproval', val('minApprovalNum'));
+  
+  // Attach Resume File
+  const fileInput = document.getElementById('resumeFile');
+  if (fileInput && fileInput.files[0]) {
+    formData.append('resumeFile', fileInput.files[0]);
   }
 
-  await sleep(400);
-  const result = computeResult();
-  lastResult = result;
-  showResult(result);
+  // Attach Answers
+  let answerIndex = 1;
+  document.querySelectorAll('[id^="answer"]').forEach(el => {
+    if (el.tagName === 'TEXTAREA') {
+      formData.append(`answer_${answerIndex}`, el.value.trim());
+      answerIndex++;
+    }
+  });
+
+  stagesEl.textContent = 'Uploading candidate data & resume…';
+  barEl.style.width = '60%';
+  await sleep(500);
+
+  try {
+    stagesEl.textContent = 'Processing evaluation via webhook…';
+    barEl.style.width = '85%';
+    
+    // Webhook URL updated to test url
+    const webhookUrl = 'https://api.agents.snsihub.ai/webhook-test/210ff37c-940e-4796-aa8c-991ac36631cc';
+    
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      body: formData
+    });
+    
+    stagesEl.textContent = 'Finalising report…';
+    barEl.style.width = '100%';
+    await sleep(400);
+
+    let resultData = null;
+    if (response.ok) {
+      try {
+        resultData = await response.json();
+      } catch(e) { /* ignore non-JSON */ }
+    } else {
+      console.warn('Webhook returned non-ok status:', response.status);
+    }
+
+    // Default to local simulation for the UI if backend doesn't return exact score schema yet
+    const result = computeResult(); 
+    
+    // Override with actual backend response if it returns expected fields
+    if (resultData) {
+       if (resultData.resumeScore !== undefined) result.resumeScore = resultData.resumeScore;
+       if (resultData.answerScore !== undefined) result.answerScore = resultData.answerScore;
+       if (resultData.approvalScore !== undefined) result.approvalScore = resultData.approvalScore;
+       if (resultData.passed !== undefined) result.passed = resultData.passed;
+       if (resultData.candidateName) result.candidateName = resultData.candidateName;
+    }
+    
+    lastResult = result;
+    showResult(result);
+
+  } catch (err) {
+    console.error('Webhook fetch error:', err);
+    stagesEl.textContent = 'Webhook error, falling back to local simulation…';
+    barEl.style.width = '100%';
+    await sleep(800);
+    
+    const result = computeResult();
+    lastResult = result;
+    showResult(result);
+  }
 }
 
 function computeResult() {
